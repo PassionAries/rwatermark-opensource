@@ -22,6 +22,22 @@
 | 微博 | ✅ | `https://video.weibo.com/show?fid=xxx` |
 | B 站 | ✅ | `https://www.bilibili.com/video/xxx` 或 `https://b23.tv/xxx` |
 | 头条 | ✅ | `https://m.toutiao.com/is/xxx` |
+| 头条 | ✅ | `https://m.toutiao.com/is/xxx` |
+| 剪映 | ✅ | `` |
+| 梨视频 | ✅ | `` |
+| 绿洲 | ✅ | `` |
+| 皮皮搞笑 | ✅ | `` |
+| 皮皮虾 | ✅ | `` |
+| 全民K歌 | ✅ | `` |
+| 搜狐 | ✅ | `` |
+| 视频号 | ✅ | `` |
+| 小云雀 | ✅ | `` |
+| 最右 | ✅ | `` |
+| 豆包 | ✅ | `` |
+
+> 逐渐增加，
+
+
 
 > 解析接口支持粘贴分享文案，服务会自动从文本中提取上述格式的链接。
 
