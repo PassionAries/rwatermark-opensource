@@ -1,0 +1,45 @@
+{
+  "port": 9200,
+  "jwt": {
+    "secret": "your-jwt-secret",
+    "expiresIn": "365d"
+  },
+  "encryption": {
+    "secretKey": "your-encryption-secret-key"
+  },
+  "serviceName": "rwatermark-server",
+  "env": "dev",
+  "defaultAppid": "",
+  "checkIn": {
+    "pointsPerDay": 10
+  },
+  "ad": {
+    "points": 10
+  },
+  "typeorm": {
+    "type": "mysql",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "username": "root",
+    "password": "your-password",
+    "database": "rwatermark",
+    "synchronize": false,
+    "logging": true
+  },
+  "xhs": {
+    "proxyUrl": ""
+  },
+  "oss": {
+    "region": "",
+    "accessKeyId": "",
+    "accessKeySecret": "",
+    "bucket": "",
+    "customDomain": ""
+  },
+  "wechatMiniMap": {
+    "wxXXXXXXXXXXXXXXXX": {
+      "appId": "wxXXXXXXXXXXXXXXXX",
+      "appSecret": "your-app-secret"
+    }
+  }
+}
