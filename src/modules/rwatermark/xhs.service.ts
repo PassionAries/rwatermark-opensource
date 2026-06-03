@@ -4,7 +4,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ShortVideoEntity } from 'src/entities/shortVideo.entity';
 import { ConfigService } from 'src/config';
 import * as superagent from 'superagent';
-
+import * as path from 'path';
+import * as fs from 'fs';
 @Injectable()
 export class XhsService implements OnModuleInit {
     async onModuleInit(){
@@ -264,7 +265,14 @@ export class XhsService implements OnModuleInit {
                         }
                     }
         }
-    
+        getCookie(): string {
+            const cookiePath = path.join(process.cwd(), 'cookies/xhs.cookie');
+            const cookie =fs.readFileSync(cookiePath, 'utf-8');
+            // if (!cookie) {
+            //     throw new Error('Cookie 文件不存在');
+            // }
+            return cookie;
+        }
         /**
          * 发送 HTTP 请求
          * @param url 请求 URL
@@ -273,6 +281,7 @@ export class XhsService implements OnModuleInit {
          */
         async get_curl(url: string, cookie: string = ''): Promise<string | null> {
                 try {
+                    let cookie = this.getCookie();
                     const proxyurl = this.proxyurl;
                     if (proxyurl) {
                     if(url.includes("http://xhslink.com")){
@@ -285,7 +294,8 @@ export class XhsService implements OnModuleInit {
                     let request = superagent
                     .get(url)
                     .set({
-                        "x-api-proxy-host":url.includes("http://xhslink.com") ? "http://xhslink.com" : "https://www.xiaohongshu.com"
+                        "x-api-proxy-host":url.includes("http://xhslink.com") ? "http://xhslink.com" : "https://www.xiaohongshu.com",
+                        "cookie":cookie
                     })
                     .set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.128 Safari/537.36')
                     .set('Accept-Encoding', 'gzip,deflate')

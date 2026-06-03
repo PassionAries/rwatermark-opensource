@@ -10,7 +10,7 @@ import { getBrowser } from './puppeteer/puppeteer';
 export class DouyinV2Service implements OnModuleInit {
      private browser:Browser|null=null;
     private pagePool: Page[] = []; // 页面池
-     private pagePoolSize = 5; // 页面池大小，可根据实际情况调整
+     private pagePoolSize = 3; // 页面池大小，可根据实际情况调整
      private pagePoolLock = false; // 页面池锁，防止并发创建过多页面
      private userAgent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
     // 构造请求头
@@ -56,8 +56,8 @@ export class DouyinV2Service implements OnModuleInit {
             for(let i=0;i<pages.length;i++){
                 let page = pages[i];
                 // await page.setViewport({ width: 1920, height: 1080 });
-                let device = KnownDevices['iPhone 14 Pro Max'];
-                await page.emulate(device);
+                // let device = KnownDevices['iPhone 14 Pro Max'];
+                // await page.emulate(device);
                 await this.enableCache(page);
                 // await page.goto("https://www.douyin.com").catch(() => {});
                 // await page.setUserAgent(this.userAgent);
@@ -122,8 +122,7 @@ export class DouyinV2Service implements OnModuleInit {
         }
         
         const page = await this.browser.newPage();
-        let device = KnownDevices['iPhone 14 Pro Max'];
-        await page.emulate(device);
+        await page.setViewport({ width: 1920, height: 1080 });
         await this.enableCache(page);
         page.goto("https://www.douyin.com").catch(() => {});
         // await page.setUserAgent(this.userAgent);
@@ -167,7 +166,42 @@ export class DouyinV2Service implements OnModuleInit {
     
     log(...args:any[]){
         console.log("douyin:",...args);
-    } 
+    }
+    unescapeDouyinJson(raw:string) {
+        const ph = '\u0001';
+        return raw
+            .replace(/\\\\\\"/g, ph)   // 字符串值内的 \\\" 先保护
+            .replace(/\\"/g, '"')       // 结构层的 \" → "
+            .replace(new RegExp(ph, 'g'), '\\"')
+            .replace(/"\$undefined"/g, 'null')
+            .replace(/"\$a"/g, 'null'); // 偶发的占位符
+        }
+      private isNavigationContextError(err: unknown): boolean {
+        const msg = err instanceof Error ? err.message : String(err);
+        return msg.includes('Execution context was destroyed')
+            || msg.includes('Cannot find context');
+    }
+         /** 页面跳转中 page.content() 会失败，重试几次 */
+    private async safePageContent(page: Page, maxRetries = 3): Promise<string> {
+        let lastError: Error;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                await page.waitForFunction(
+                    () => document.readyState === 'complete',
+                    { timeout: 12000 },
+                ).catch(() => {});
+                return await page.content();
+            } catch (e) {
+                lastError = e instanceof Error ? e : new Error(String(e));
+                if (!this.isNavigationContextError(e) || attempt >= maxRetries - 1) {
+                    throw lastError;
+                }
+                this.log(`safePageContent 重试 (${attempt + 1}/${maxRetries}):`, lastError.message);
+                await new Promise(resolve => setTimeout(resolve, 800 * (attempt + 1)));
+            }
+        }
+        throw lastError!;
+    }
      async parseWatermark(url:string,openid:string,appid:string,originUrl:string){
         if(!this.browser){
             throw new Error("browser not found");
@@ -189,21 +223,25 @@ export class DouyinV2Service implements OnModuleInit {
                 waitUntil: 'domcontentloaded', // 或 'networkidle2'（最多2个连接）
                 // timeout: 1000*60 // 增加到60秒
             });
+            // await new Promise(resolve => setTimeout(resolve, 350));
             let pageUrl = page.url();
             console.log("pageUrl:",pageUrl);
-            if(!pageUrl.includes("www.douyin.com") && !pageUrl.includes("iesdouyin.com")){
-                await page.goto(`https://www.douyin.com/video/${id}`,{
-                    waitUntil: 'domcontentloaded', // 或 'networkidle2'（最多2个连接）
-                    // timeout: 1000*60 // 增加到60秒
-                });
-                pageUrl = page.url();
-            }
+            // if(!pageUrl.includes("www.douyin.com") && !pageUrl.includes("iesdouyin.com")){
+            //     await page.goto(`https://www.douyin.com/video/${id}`,{
+            //         waitUntil: 'domcontentloaded', // 或 'networkidle2'（最多2个连接）
+            //         // timeout: 1000*60 // 增加到60秒
+            //     });
+            //     pageUrl = page.url();
+            // }
+            // if(pageUrl.startsWith("https://www.iesdouyin.com/share/video/")){
+            //     // let id = pageUrl.split("/").pop();
             if(pageUrl.startsWith("https://www.douyin.com/video") ){
                     this.log("waitForResponse:aweme/v1/web/aweme/detail/");
                     // 先获取文本内容，然后手动解析 JSON（避免响应体被消费的问题）
                     let textData: string='';
                     let retryCount = 0;
                     const maxRetries = 3;
+                    // user-tab-count
                     // let content = await page.content();
                     // console.log("content:",content);
                     while (retryCount < maxRetries) {
@@ -211,13 +249,12 @@ export class DouyinV2Service implements OnModuleInit {
                             let response2 = await page.waitForResponse(response => {
                                 const url = response.url();
                                 const method = response.request().method();
-                                const isValid = url.startsWith("https://www.douyin.com/aweme/v1/web/aweme/detail") 
-                                && method === 'GET' 
-                                && response.ok();
-                                return isValid;
+                                const isValid = url.includes("/aweme/v1/web/aweme/detail"); 
+                                return isValid && method === 'GET' && response.ok();
                             }, {
                                 timeout: 1000*15 // 增加到15秒
                             });
+                            console.log("pageUrl:",page.url());
 
                             textData = await response2.text();                                                        
                             this.log(`响应文本长度: ${textData ? textData.length : 0}, 重试次数: ${retryCount}`);
@@ -230,7 +267,7 @@ export class DouyinV2Service implements OnModuleInit {
                             // 如果文本为空且还有重试机会，等待后重试
                             if (retryCount < maxRetries - 1) {
                                 this.log(`响应文本为空，等待 ${(retryCount + 1) * 200}ms 后重试...`);
-                                await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000));
+                                    await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000));
                                 retryCount++;
                             } else {
                                 // 最后一次重试仍然为空
@@ -243,7 +280,7 @@ export class DouyinV2Service implements OnModuleInit {
                         } catch (error) {
                             if (retryCount < maxRetries - 1) {
                                 this.log(`获取响应文本失败: ${error.message}，等待 ${(retryCount + 1) * 200}ms 后重试...`);
-                                
+                                await page.reload();
                                 await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 200));
                                 retryCount++;
                             } else {
@@ -284,15 +321,20 @@ export class DouyinV2Service implements OnModuleInit {
                     let url_list = data.aweme_detail?.video?.play_addr?.url_list||[];
                     let play_url = url_list[url_list.length-1]||'';
                     shortVideo.content={
-                        author: data.aweme_detail.video?.nickname || '',
-                        uid: data.aweme_detail.author?.sec_uid || '',
-                        avatar: data.aweme_detail.author?.avatar_thumb?.url_list?.[0] || '',
+                        user_info: {
+                            nickname: data.aweme_detail.author?.nickname || '',
+                            unique_id: data.aweme_detail.author?.sec_uid || '',
+                            avatar_medium: data.aweme_detail.author?.avatar_thumb?.url_list?.[0] || '',
+                        },
                         like: data.aweme_detail.statistics?.digg_count || 0,
                         time: data.aweme_detail.create_time || 0,
                         title: data.aweme_detail?.desc || '',
                         cover: data.aweme_detail?.cover_hd?.cover?.url_list?.[0] || '',
                         images: data.aweme_detail?.images?.length > 0 ? data.aweme_detail?.images : '', //当前为短视频解析模式
                         url: play_url,
+                        videos:[
+                            {url: play_url,cover: data.aweme_detail?.cover_hd?.cover?.url_list?.[0] || ''}
+                        ],
                         music: {
                             title: data.aweme_detail?.music?.title || '',
                             author: data.aweme_detail?.music?.author || '',
@@ -307,7 +349,116 @@ export class DouyinV2Service implements OnModuleInit {
                     return {
                         id:shortVideo.id,
                     };
+            }else if(pageUrl.startsWith("https://www.douyin.com/note")){ //图文分享
+                this.log("waitForResponse:aweme/v1/web/aweme/post");
+                let htmlcontent = await this.safePageContent(page);
+                // console.log("htmlcontent",htmlcontent);
+                htmlcontent = htmlcontent.replace(/\$undefined/g, 'null');
+                let out = htmlcontent.match(/\{\\"awemeId.+?<\/script>/)?.[0]||null;
+            //    console.log("out",out);
+                // .text().match(/\{\"awemeId\"\:".+\n/);
+                // let out = htmlcontent.match(/{\"awemeId.+?\}\]<\/script>/s);
+                // console.log("out",out);
+                // fs.writeFileSync(process.cwd()+"/htmlcontent_"+id+".html",out||'');
+                if(!out){
+                    this.log("图文分享不存在");
+                    return null;
+                }
+                // let obj = out[0].slice(0, -3);
+                let jobj = out.slice(0, -15)
+                // console.log("jobj",jobj.toString());
+                let aweme = JSON.parse(this.unescapeDouyinJson(jobj.toString())).aweme.detail;
+                //  let response2 = await page.waitForResponse(response => {
+                //     const url = response.url();
+                //     const method = response.request().method();
+                //     const isValid = url.includes("aweme/v1/web/aweme/post") 
+                //     && method === 'GET' 
+                //     && response.ok();
+                //     return isValid;
+                // }, {
+                //     timeout: 1000*15 // 增加到15秒
+                // });
+
+                // let textData = await response2.text();                                                        
+                // this.log(`note = 响应文本长度: ${textData ? textData.length : 0}`);
+                // let aweme_list = JSON.parse(textData).aweme_list;
+                // return null;
+                let aweme_detail = aweme;//aweme_list.find((item: any) => item.aweme_id === id);
+                this.log("aweme_detail",aweme_detail);
+                if(!aweme_detail){
+                    shortVideo.status=2;
+                    shortVideo.msg="图文分享不存在";
+                    await this.shortVideoRepository.save(shortVideo);
+                    return null;
+                }
+                let images:string[]=[];
+                let videos:{url:string,cover:string,width?:number,height?:number}[]=[];
+                let music ={
+                    title: aweme_detail?.music?.title||'',
+                    author: aweme_detail?.music?.author||'',
+                    avatar: aweme_detail?.music?.coverThumb.urlList[0]||'',
+                    url: aweme_detail?.music?.playUrl.uri
+                }
+                let desc =aweme_detail?.desc||''
+                if(aweme_detail.images){
+                   aweme_detail.images.map((item:any)=>{
+                    if(item?.urlList && item?.urlList.length > 0){
+                        images.push(item?.urlList?.[0]||'');
+                    }
+                    if(item.video){
+                        // let play_url = item.video.playAddr.find((item:any)=>{
+                        //     let url = item.src;
+                        //     if(url && url.includes('play')){
+                        //         return url;
+                        //     }
+                        // })
+                        let play_url = item.video.playApi||'';
+                        // if(!play_url){
+                        //     // item.video.playAddr.urlList[item.video.playAddr.urlList.length-1];
+                        // }
+                        if(play_url){
+                            videos.push({
+                                url: play_url||'',
+                                cover: item.video.cover,
+                                width: item.video.width||0,
+                                height: item.video.height||0,
+                            });
+                        }
+                    }
+                   }) 
+                }
+                
+                shortVideo.content={
+                    user_info: {
+                        nickname: aweme_detail.author?.nickname || '',
+                        unique_id: aweme_detail.author?.unique_id || '',
+                        avatar_medium: aweme_detail.author?.avatarThumb.urlList[0] || '',
+                    },
+                    title: desc|| '',
+                    cover: videos?.[0]?.cover||'',
+                    images: images,
+                    videos: videos||[],
+                    music: music,
+                    url:videos?.[0]?.url||'',
+                    create_time: aweme_detail.createTime || 0,
+                };
+                shortVideo.status=1;
+                shortVideo = await this.shortVideoRepository.save(shortVideo);
+                return {
+                    id:shortVideo.id,
+                };
+                // this.log(`响应文本: ${textData}`);
+                // 如果文本不为空，跳出循环
+               
+            }else if(pageUrl.startsWith("https://music.douyin.com")){ //音乐分享
+
+            }else{
+                shortVideo.status=2;
+                shortVideo.msg="簪不支持该类型。";
+                await this.shortVideoRepository.save(shortVideo);
+                return null;
             }
+            
             // await page.close();
         }catch(err){
             this.log('parseWatermark error:', err);
@@ -325,6 +476,7 @@ export class DouyinV2Service implements OnModuleInit {
             return null;
         }
         const response = await (await superagent.post('https://www.iesdouyin.com/share/video/' + id).set(this.headers));
+        // console.log("response",response.text);
         // console.log(response.text);
                 // 提取 window._ROUTER_DATA 的内容
         const pattern = /window\._ROUTER_DATA\s*=\s*(.*?)\<\/script>/s;
@@ -339,6 +491,7 @@ export class DouyinV2Service implements OnModuleInit {
          let videoInfo: any;
         try {
             videoInfo = JSON.parse(matches[1].trim());
+            console.log("videoInfo",matches[1].trim());
         } catch (error) {
             console.log('JSON 解析失败: ' + (error instanceof Error ? error.message : String(error)));
             shortVideo.status=2
@@ -416,11 +569,8 @@ export class DouyinV2Service implements OnModuleInit {
             time: itemList.create_time || 0,
             title: itemList.desc || '',
             cover: itemList.video?.cover?.url_list?.[0] || '',
-            images: imgurl.length > 0 ? imgurl : '', //当前为短视频解析模式
-            url: imgurl.length > 0 
-                ? ''//`当前为图文解析，图文数量为:${imgurl.length}张图片` 
-                : videoResUrl,
-            music: music || '音乐为视频原声',
+            images: imgurl.length > 0 ? imgurl : [], //当前为短视频解析模式
+            url: videoResUrl,
         };
         if(imgurl.length > 0){
             shortVideo.contentType='image';
